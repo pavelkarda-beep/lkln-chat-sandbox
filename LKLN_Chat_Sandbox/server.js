@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
+const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
@@ -11,18 +12,25 @@ const io = new Server(server, {
   }
 });
 
-// Statické soubory (frontend)
 app.use(express.static(path.join(__dirname, "public")));
 
-// In-memory registry připojených uživatelů
-// key: socket.id, value: { name, callsign, lat, lon, airport }
 const clients = new Map();
 
-io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
+const airports = new Map();
 
-  // Klient se identifikuje (jméno, callsign, letiště)
-  socket.on("join", ({ name, callsign, airport }) => {
+function getAirportState(airport) {
+  if (!airports.has(airport)) {
+    airports.set(airport, {
+      runwayStatus: "RWY OPEN",
+      atis: "INFO ALFA · QNH 1015",
+      requests: []
+    });
+  }
+  return airports.get(airport);
+}
+
+io.on("connection", (socket) => {
+  socket.on("join", ({ name, callsign, airport, role }) => {
     if (!airport) airport = "LKLN";
 
     clients.set(socket.id, {
@@ -30,14 +38,12 @@ io.on("connection", (socket) => {
       callsign,
       lat: null,
       lon: null,
-      airport
+      airport,
+      role: role || "pilot"
     });
 
     socket.join(`airport:${airport}`);
 
-    console.log(`JOIN ${socket.id}: ${name} / ${callsign} @ ${airport}`);
-
-    // pošleme mu aktuální seznam ostatních
     const others = [];
     for (const [id, info] of clients.entries()) {
       if (id !== socket.id && info.airport === airport) {
@@ -50,17 +56,18 @@ io.on("connection", (socket) => {
         });
       }
     }
-    socket.emit("airport:state", { airport, others });
 
-    // ostatním oznámíme nového uživatele
+    socket.emit("airport:state", { airport, others });
     socket.to(`airport:${airport}`).emit("airport:user-joined", {
       id: socket.id,
       name,
       callsign
     });
+
+    const airportState = getAirportState(airport);
+    socket.emit("ops:state", airportState);
   });
 
-  // Aktualizace polohy
   socket.on("position:update", ({ lat, lon }) => {
     const client = clients.get(socket.id);
     if (!client) return;
@@ -68,7 +75,6 @@ io.on("connection", (socket) => {
     client.lat = lat;
     client.lon = lon;
 
-    // broadcast ostatním v rámci stejného letiště
     io.to(`airport:${client.airport}`).emit("position:update", {
       id: socket.id,
       name: client.name,
@@ -78,7 +84,56 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Zpráva do letištního chatu
+  socket.on("ops:update", ({ runwayStatus, atis }) => {
+    const client = clients.get(socket.id);
+    if (!client || client.role !== "ops") return;
+
+    const airportState = getAirportState(client.airport);
+
+    if (runwayStatus) {
+      airportState.runwayStatus = runwayStatus;
+    }
+    if (atis) {
+      airportState.atis = atis;
+    }
+
+    io.to(`airport:${client.airport}`).emit("ops:state", airportState);
+  });
+
+  socket.on("pilot:request", ({ text }) => {
+    const client = clients.get(socket.id);
+    if (!client || !text || !text.trim()) return;
+
+    const airportState = getAirportState(client.airport);
+    const request = {
+      id: crypto.randomUUID(),
+      callsign: client.callsign,
+      name: client.name,
+      text: text.trim(),
+      status: "new",
+      ts: Date.now()
+    };
+
+    airportState.requests.push(request);
+    io.to(`airport:${client.airport}`).emit("pilot:request:created", request);
+  });
+
+  socket.on("pilot:request:update", ({ requestId, status }) => {
+    const client = clients.get(socket.id);
+    if (!client || client.role !== "ops") return;
+    if (!["approved", "rejected"].includes(status)) return;
+
+    const airportState = getAirportState(client.airport);
+    const request = airportState.requests.find((item) => item.id === requestId);
+    if (!request) return;
+
+    request.status = status;
+    io.to(`airport:${client.airport}`).emit("pilot:request:updated", {
+      requestId,
+      status
+    });
+  });
+
   socket.on("chat:airport-message", ({ text }) => {
     const client = clients.get(socket.id);
     if (!client || !text || !text.trim()) return;
@@ -98,7 +153,6 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const client = clients.get(socket.id);
     if (client) {
-      console.log("Client disconnected:", socket.id);
       io.to(`airport:${client.airport}`).emit("airport:user-left", {
         id: socket.id,
         callsign: client.callsign

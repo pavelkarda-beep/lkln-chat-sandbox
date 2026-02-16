@@ -2,10 +2,9 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8" />
-  <title>LKLN Chat Sandbox</title>
+  <title>Airport Mini Tower</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -17,45 +16,88 @@
 <body>
   <div id="app">
     <header>
-      <h1>LKLN Chat Sandbox</h1>
+      <h1>Airport Mini Tower</h1>
       <div id="user-info"></div>
     </header>
 
     <section id="login-section">
-      <h2>Přihlášení</h2>
+      <h2>Přihlášení do letištního provozu</h2>
       <label>
         Jméno<br />
         <input type="text" id="name-input" placeholder="Např. Pavel" />
       </label>
       <label>
-        Callsign / OK-xxx<br />
+        Callsign / identifikace<br />
         <input type="text" id="callsign-input" placeholder="OK-GEO1" />
       </label>
-      <button id="login-btn">Připojit k LKLN</button>
+      <label>
+        ICAO letiště<br />
+        <input type="text" id="airport-input" placeholder="LKLN" value="LKLN" />
+      </label>
+      <label>
+        Role<br />
+        <select id="role-input">
+          <option value="pilot">Pilot</option>
+          <option value="ops">Letištní dispečer</option>
+        </select>
+      </label>
+      <button id="login-btn">Připojit</button>
       <p id="login-error" class="error"></p>
     </section>
 
     <section id="main-section" class="hidden">
       <div id="map"></div>
 
-      <div id="chat">
-        <h2>LKLN – Chat</h2>
-        <div id="messages"></div>
-        <div id="chat-input-row">
-          <input
-            type="text"
-            id="chat-input"
-            placeholder="Napiš zprávu pro LKLN…"
-          />
-          <button id="chat-send-btn">Odeslat</button>
+      <div id="right-column">
+        <div id="ops-panel" class="panel">
+          <h2>Provoz letiště</h2>
+          <p><strong>Dráha:</strong> <span id="runway-status">—</span></p>
+          <p><strong>ATIS:</strong> <span id="atis-text">—</span></p>
+
+          <div id="ops-edit" class="hidden">
+            <label>
+              Stav dráhy
+              <input type="text" id="runway-input" placeholder="RWY 09/27 OPEN" />
+            </label>
+            <label>
+              Text ATIS
+              <input type="text" id="atis-input" placeholder="QNH 1018, vítr 070/08" />
+            </label>
+            <button id="ops-save-btn">Uložit provozní informace</button>
+          </div>
+        </div>
+
+        <div id="request-panel" class="panel">
+          <h2>Požadavky pilotů</h2>
+
+          <div id="pilot-request-form">
+            <label>
+              Nový požadavek
+              <input type="text" id="request-input" placeholder="Žádám spuštění motoru / pojíždění" />
+            </label>
+            <button id="request-send-btn">Odeslat požadavek</button>
+          </div>
+
+          <div id="requests-list"></div>
+        </div>
+
+        <div id="chat" class="panel">
+          <h2>Letištní chat</h2>
+          <div id="messages"></div>
+          <div id="chat-input-row">
+            <input
+              type="text"
+              id="chat-input"
+              placeholder="Napiš zprávu pro letiště…"
+            />
+            <button id="chat-send-btn">Odeslat</button>
+          </div>
         </div>
       </div>
     </section>
   </div>
 
-  <!-- Socket.IO -->
   <script src="/socket.io/socket.io.js"></script>
-  <!-- Leaflet JS -->
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+hJkC2RkS1f0zZQA="
