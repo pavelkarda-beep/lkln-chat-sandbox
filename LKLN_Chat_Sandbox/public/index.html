@@ -2,10 +2,8 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8" />
-  <title>LKLN Chat Sandbox</title>
+  <title>Airport Mini Tower</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -17,51 +15,164 @@
 <body>
   <div id="app">
     <header>
-      <h1>LKLN Chat Sandbox</h1>
+      <h1>Airport Mini Tower / LKLN Data Hub</h1>
       <div id="user-info"></div>
     </header>
 
     <section id="login-section">
       <h2>Přihlášení</h2>
+      <label>Jméno<input type="text" id="name-input" placeholder="Pavel" /></label>
+      <label>Callsign<input type="text" id="callsign-input" placeholder="OK-GEO1" /></label>
+      <label>ICAO letiště<input type="text" id="airport-input" value="LKLN" /></label>
+      <label>Sektor<input type="text" id="sector-input" value="TWR" /></label>
       <label>
-        Jméno<br />
-        <input type="text" id="name-input" placeholder="Např. Pavel" />
+        Role
+        <select id="role-input">
+          <option value="pilot">pilot</option>
+          <option value="ops">dispečer</option>
+          <option value="admin">admin</option>
+        </select>
       </label>
-      <label>
-        Callsign / OK-xxx<br />
-        <input type="text" id="callsign-input" placeholder="OK-GEO1" />
-      </label>
-      <button id="login-btn">Připojit k LKLN</button>
+      <button id="login-btn">Připojit</button>
       <p id="login-error" class="error"></p>
     </section>
 
     <section id="main-section" class="hidden">
       <div id="map"></div>
 
-      <div id="chat">
-        <h2>LKLN – Chat</h2>
-        <div id="messages"></div>
-        <div id="chat-input-row">
-          <input
-            type="text"
-            id="chat-input"
-            placeholder="Napiš zprávu pro LKLN…"
-          />
-          <button id="chat-send-btn">Odeslat</button>
+      <div id="right-column">
+        <div class="panel" id="ops-panel">
+          <h2>Provoz letiště</h2>
+          <p><strong>Dráha:</strong> <span id="runway-status">—</span></p>
+          <p><strong>ATIS:</strong> <span id="atis-text">—</span></p>
+          <div id="ops-edit" class="hidden">
+            <label>Stav dráhy<input id="runway-input" type="text" /></label>
+            <label>ATIS<input id="atis-input" type="text" /></label>
+            <button id="ops-save-btn">Uložit</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Rychlé zadání letadla (non ADS-B)</h2>
+          <label>Callsign<input id="quick-callsign" type="text" placeholder="OK-ABC1" /></label>
+          <label>Typ letadla<input id="quick-type" type="text" placeholder="C172" /></label>
+          <label>Pilot<input id="quick-pilot" type="text" placeholder="Novák" /></label>
+          <label>Pohyb
+            <select id="quick-movement">
+              <option value="arrival">Přílet</option>
+              <option value="departure">Odlet</option>
+            </select>
+          </label>
+          <label>Koordinační dohoda (LKLN)<input id="quick-lkln" type="text" placeholder="LKLN-2026-01" /></label>
+          <button id="quick-add-btn">Založit a přidat pohyb</button>
+        </div>
+
+        <div class="panel">
+          <h2>Letadla</h2>
+          <div class="row">
+            <label>Filtr LKLN dohody
+              <select id="agreement-filter">
+                <option value="all">Všechna</option>
+                <option value="with">Pouze s dohodou</option>
+                <option value="without">Pouze bez dohody</option>
+              </select>
+            </label>
+            <button id="aircraft-export-btn">Export CSV</button>
+          </div>
+          <div id="aircraft-list"></div>
+        </div>
+
+        <div class="panel hidden" id="aircraft-detail-panel">
+          <h2>Detail letadla</h2>
+          <button id="aircraft-back-btn" class="btn-small">← Zpět na seznam</button>
+          <div id="aircraft-detail"></div>
+          <button id="aircraft-save-btn">Uložit detail</button>
+        </div>
+
+        <div class="panel">
+          <h2>Přílety / Odlety</h2>
+          <div class="split">
+            <div>
+              <h3>Přílety</h3>
+              <div id="arrivals-list"></div>
+            </div>
+            <div>
+              <h3>Odlety</h3>
+              <div id="departures-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Alerty a provozní predikce</h2>
+          <p><strong>Predikce hustoty:</strong> <span id="density-prediction">—</span></p>
+          <div id="alerts-list"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Statistiky vzletů/přistání</h2>
+          <div class="row">
+            <label>Typ<input id="stats-type" type="text" placeholder="C172" /></label>
+            <label>Pilot<input id="stats-pilot" type="text" placeholder="Novák" /></label>
+            <label>Od<input id="stats-from" type="date" /></label>
+            <label>Do<input id="stats-to" type="date" /></label>
+          </div>
+          <div class="row">
+            <button id="stats-apply-btn">Filtrovat</button>
+            <button id="stats-export-csv-btn">Export CSV</button>
+            <button id="stats-export-pdf-btn">Export PDF</button>
+          </div>
+          <div id="stats-list"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Uživatelé a audit log</h2>
+          <div id="user-management" class="hidden">
+            <label>Uživatel ID<input id="assign-user-id" type="text" placeholder="socket id" /></label>
+            <label>Nová role
+              <select id="assign-role">
+                <option value="pilot">pilot</option>
+                <option value="ops">ops</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <label>Letiště<input id="assign-airport" type="text" value="LKLN" /></label>
+            <label>Sektor<input id="assign-sector" type="text" value="TWR" /></label>
+            <button id="assign-user-btn">Upravit uživatele</button>
+          </div>
+          <div id="users-list"></div>
+          <h3>Audit log</h3>
+          <div id="audit-log"></div>
+        </div>
+
+        <div class="panel hidden" id="regional-sharing-panel">
+          <h2>Regionální skupiny letišť</h2>
+          <label>Název skupiny<input id="group-name" type="text" /></label>
+          <label>Letiště (oddělená čárkou)<input id="group-airports" type="text" placeholder="LKLN,LKPM" /></label>
+          <label><input id="group-share-alerts" type="checkbox" checked /> Sdílet alerty přiblížení</label>
+          <label><input id="group-share-track" type="checkbox" /> Sdílet celé trasy</label>
+          <button id="group-save-btn">Uložit skupinu</button>
+          <div id="groups-list"></div>
+        </div>
+
+        <div id="chat" class="panel">
+          <h2>Chat</h2>
+          <div id="messages"></div>
+          <div id="chat-input-row">
+            <input type="text" id="chat-input" placeholder="Zpráva..." />
+            <button id="chat-send-btn">Odeslat</button>
+          </div>
         </div>
       </div>
     </section>
   </div>
 
-  <!-- Socket.IO -->
   <script src="/socket.io/socket.io.js"></script>
-  <!-- Leaflet JS -->
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+hJkC2RkS1f0zZQA="
     crossorigin=""
   ></script>
-
   <script src="client.js"></script>
 </body>
 </html>
