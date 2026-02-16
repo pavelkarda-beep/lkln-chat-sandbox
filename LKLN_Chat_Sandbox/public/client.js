@@ -4,7 +4,20 @@ const loginBtn = document.getElementById("login-btn");
 const loginError = document.getElementById("login-error");
 const nameInput = document.getElementById("name-input");
 const callsignInput = document.getElementById("callsign-input");
+const airportInput = document.getElementById("airport-input");
+const roleInput = document.getElementById("role-input");
 const userInfoEl = document.getElementById("user-info");
+
+const runwayStatusEl = document.getElementById("runway-status");
+const atisTextEl = document.getElementById("atis-text");
+const opsEditEl = document.getElementById("ops-edit");
+const runwayInput = document.getElementById("runway-input");
+const atisInput = document.getElementById("atis-input");
+const opsSaveBtn = document.getElementById("ops-save-btn");
+
+const requestInput = document.getElementById("request-input");
+const requestSendBtn = document.getElementById("request-send-btn");
+const requestsListEl = document.getElementById("requests-list");
 
 const messagesEl = document.getElementById("messages");
 const chatInput = document.getElementById("chat-input");
@@ -14,15 +27,16 @@ let socket = null;
 let map = null;
 let userMarker = null;
 const otherMarkers = new Map();
+let requests = [];
 
 let currentUser = {
   name: null,
   callsign: null,
-  airport: "LKLN"
+  airport: "LKLN",
+  role: "pilot"
 };
 
-// Líně – přibližné souřadnice
-const LKLN_CENTER = [49.675, 13.276];
+const AIRPORT_CENTER = [49.675, 13.276];
 
 function appendMessage(msg) {
   const wrapper = document.createElement("div");
@@ -47,8 +61,61 @@ function appendMessage(msg) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+function renderRequests() {
+  requestsListEl.innerHTML = "";
+
+  if (!requests.length) {
+    requestsListEl.innerHTML = '<p class="muted">Zatím bez požadavků.</p>';
+    return;
+  }
+
+  requests
+    .slice()
+    .sort((a, b) => b.ts - a.ts)
+    .forEach((req) => {
+      const item = document.createElement("div");
+      item.className = `request-item state-${req.status}`;
+
+      const top = document.createElement("div");
+      top.className = "request-top";
+      top.textContent = `${req.callsign} · ${req.text}`;
+
+      const meta = document.createElement("div");
+      meta.className = "request-meta";
+      meta.textContent = `Stav: ${req.status.toUpperCase()}`;
+
+      item.appendChild(top);
+      item.appendChild(meta);
+
+      if (currentUser.role === "ops" && req.status === "new") {
+        const actions = document.createElement("div");
+        actions.className = "request-actions";
+
+        const approveBtn = document.createElement("button");
+        approveBtn.className = "btn-small";
+        approveBtn.textContent = "Schválit";
+        approveBtn.addEventListener("click", () => {
+          socket.emit("pilot:request:update", { requestId: req.id, status: "approved" });
+        });
+
+        const rejectBtn = document.createElement("button");
+        rejectBtn.className = "btn-small danger";
+        rejectBtn.textContent = "Zamítnout";
+        rejectBtn.addEventListener("click", () => {
+          socket.emit("pilot:request:update", { requestId: req.id, status: "rejected" });
+        });
+
+        actions.appendChild(approveBtn);
+        actions.appendChild(rejectBtn);
+        item.appendChild(actions);
+      }
+
+      requestsListEl.appendChild(item);
+    });
+}
+
 function initMap() {
-  map = L.map("map").setView(LKLN_CENTER, 13);
+  map = L.map("map").setView(AIRPORT_CENTER, 13);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 18,
@@ -69,29 +136,28 @@ function updateUserMarker(lat, lon) {
 
 function upsertOtherMarker({ id, name, callsign, lat, lon }) {
   if (!lat || !lon) return;
-  let m = otherMarkers.get(id);
-  if (!m) {
-    m = L.marker([lat, lon], {
+  let marker = otherMarkers.get(id);
+  if (!marker) {
+    marker = L.marker([lat, lon], {
       title: `${callsign || ""} – ${name || ""}`,
       opacity: 0.85
     }).addTo(map);
-    otherMarkers.set(id, m);
+    otherMarkers.set(id, marker);
   } else {
-    m.setLatLng([lat, lon]);
+    marker.setLatLng([lat, lon]);
   }
 }
 
 function removeOtherMarker(id) {
-  const m = otherMarkers.get(id);
-  if (m) {
-    map.removeLayer(m);
+  const marker = otherMarkers.get(id);
+  if (marker) {
+    map.removeLayer(marker);
     otherMarkers.delete(id);
   }
 }
 
 function startGeolocation() {
   if (!navigator.geolocation) {
-    console.warn("Geolocation not supported.");
     return;
   }
 
@@ -106,9 +172,7 @@ function startGeolocation() {
         socket.emit("position:update", { lat, lon });
       }
     },
-    (err) => {
-      console.warn("Geolocation error:", err.message);
-    },
+    () => {},
     {
       enableHighAccuracy: true,
       maximumAge: 5000,
@@ -117,70 +181,110 @@ function startGeolocation() {
   );
 }
 
-// Připojení k Socket.IO a handlery
+function applyOpsState({ runwayStatus, atis, requests: incomingRequests }) {
+  runwayStatusEl.textContent = runwayStatus || "—";
+  atisTextEl.textContent = atis || "—";
+  runwayInput.value = runwayStatus || "";
+  atisInput.value = atis || "";
+  requests = incomingRequests || [];
+  renderRequests();
+}
+
 function connectSocket() {
   socket = io();
 
   socket.on("connect", () => {
-    console.log("Connected:", socket.id);
     socket.emit("join", {
       name: currentUser.name,
       callsign: currentUser.callsign,
-      airport: currentUser.airport
+      airport: currentUser.airport,
+      role: currentUser.role
     });
   });
 
-  socket.on("airport:state", ({ airport, others }) => {
-    console.log("Airport state", airport, others);
+  socket.on("airport:state", ({ others }) => {
     others.forEach((u) => upsertOtherMarker(u));
   });
 
-  socket.on("airport:user-joined", ({ id, name, callsign }) => {
-    console.log("User joined", id, name, callsign);
-    // marker se vytvoří až s pozicí
-  });
-
-  socket.on("airport:user-left", ({ id, callsign }) => {
-    console.log("User left", id, callsign);
+  socket.on("airport:user-left", ({ id }) => {
     removeOtherMarker(id);
   });
 
   socket.on("position:update", (payload) => {
-    if (payload.id === socket.id) return; // vlastního řešíme zvlášť
+    if (payload.id === socket.id) return;
     upsertOtherMarker(payload);
   });
 
   socket.on("chat:airport-message", (msg) => {
     appendMessage(msg);
   });
+
+  socket.on("ops:state", (state) => {
+    applyOpsState(state);
+  });
+
+  socket.on("pilot:request:created", (request) => {
+    requests.push(request);
+    renderRequests();
+  });
+
+  socket.on("pilot:request:updated", ({ requestId, status }) => {
+    requests = requests.map((item) => {
+      if (item.id !== requestId) return item;
+      return { ...item, status };
+    });
+    renderRequests();
+  });
 }
 
 loginBtn.addEventListener("click", () => {
   const name = nameInput.value.trim();
   const callsign = callsignInput.value.trim();
+  const airport = airportInput.value.trim().toUpperCase();
+  const role = roleInput.value;
 
-  if (!name || !callsign) {
-    loginError.textContent = "Vyplň prosím jméno i callsign.";
+  if (!name || !callsign || !airport) {
+    loginError.textContent = "Vyplň prosím jméno, callsign i ICAO letiště.";
     return;
   }
 
   loginError.textContent = "";
   currentUser.name = name;
   currentUser.callsign = callsign.toUpperCase();
+  currentUser.airport = airport;
+  currentUser.role = role;
 
-  userInfoEl.textContent = `${currentUser.name} (${currentUser.callsign}) @ LKLN`;
+  userInfoEl.textContent = `${currentUser.name} (${currentUser.callsign}) @ ${currentUser.airport} · ${currentUser.role}`;
+
+  if (currentUser.role === "ops") {
+    opsEditEl.classList.remove("hidden");
+  }
 
   loginSection.classList.add("hidden");
   mainSection.classList.remove("hidden");
 
   if (!map) {
     initMap();
-    // defaultně marker na LKLN, než přijde geolokace
-    updateUserMarker(LKLN_CENTER[0], LKLN_CENTER[1]);
+    updateUserMarker(AIRPORT_CENTER[0], AIRPORT_CENTER[1]);
   }
 
   connectSocket();
   startGeolocation();
+});
+
+opsSaveBtn.addEventListener("click", () => {
+  if (!socket || currentUser.role !== "ops") return;
+  socket.emit("ops:update", {
+    runwayStatus: runwayInput.value.trim(),
+    atis: atisInput.value.trim()
+  });
+});
+
+requestSendBtn.addEventListener("click", () => {
+  const text = requestInput.value.trim();
+  if (!socket || !text) return;
+  socket.emit("pilot:request", { text });
+  requestInput.value = "";
 });
 
 chatSendBtn.addEventListener("click", () => {
